@@ -1,0 +1,21 @@
+[target.xtensa-esp32s3-none-elf]
+runner = "probe-rs run --chip esp32s3"
+rustflags = [
+  "-C", "link-arg=-nostartfiles",
+  "-C", "link-arg=-Wl,-Tlinkall.x",
+  "-C", "link-arg=-Tdefmt.x",
+]
+
+[target.xtensa-esp32s2-none-elf]
+runner = "espflash flash --monitor -L defmt"
+rustflags = [
+  "-C", "link-arg=-nostartfiles",
+  "-C", "link-arg=-Wl,-Tlinkall.x",
+  "-C", "link-arg=-Tdefmt.x",
+]
+
+[build]
+target = "xtensa-esp32s2-none-elf"
+
+[unstable]
+build-std = ["core"]
