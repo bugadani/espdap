@@ -40,10 +40,10 @@ use static_cell::StaticCell;
 type MyDriver = Driver<'static>;
 
 // Pin configuration
-const TDI_PIN: u8 = 0;
-const TMS_SWDIO_PIN: u8 = 1;
-const TCK_SWCLK_PIN: u8 = 2;
-const TDO_PIN: u8 = 3;
+const TDI_PIN: u8 = 15;
+const TMS_SWDIO_PIN: u8 = 16;
+const TCK_SWCLK_PIN: u8 = 17;
+const TDO_PIN: u8 = 18;
 
 #[embassy_executor::task]
 async fn usb_task(mut device: UsbDevice<'static, MyDriver>) {
@@ -61,10 +61,10 @@ async fn main(spawner: Spawner) -> () {
     let io = Io::new(peripherals.GPIO, peripherals.IO_MUX);
 
     // Pinout
-    let t_jtdi = io.pins.gpio0;
-    let t_jtms_swdio = io.pins.gpio1;
-    let t_jtck_swclk = io.pins.gpio2;
-    let t_jtdo = io.pins.gpio3;
+    let t_jtdi = io.pins.gpio15;
+    let t_jtms_swdio = io.pins.gpio16;
+    let t_jtck_swclk = io.pins.gpio17;
+    let t_jtdo = io.pins.gpio18;
     //let t_nrst = io.pins.gpio4;
     //let t_swo = io.pins.gpio5;
 
