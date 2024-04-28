@@ -13,6 +13,7 @@ use defmt::{info, panic, todo, unwrap, warn};
 use defmt_rtt as _;
 use embassy_executor::Spawner;
 use embassy_usb::{
+    class::cdc_acm::{CdcAcmClass, State},
     driver::{Endpoint, EndpointError, EndpointIn, EndpointOut},
     msos::{self, windows_version},
     types::StringIndex,
@@ -101,6 +102,7 @@ async fn main(spawner: Spawner) -> () {
 
     builder.msos_descriptor(windows_version::WIN8_1, 0);
 
+    // DAP - Custom Class 0
     let iface_string = builder.string();
     let mut function = builder.function(0xFF, 0, 0);
     function.msos_feature(msos::CompatibleIdFeatureDescriptor::new("WINUSB", ""));
@@ -117,6 +119,11 @@ async fn main(spawner: Spawner) -> () {
 
     static CONTROL_HANDLER: StaticCell<Control> = StaticCell::new();
     builder.handler(CONTROL_HANDLER.init(Control { iface_string }));
+
+    // CDC - dummy class to get things working for now. Windows needs more than one interface
+    // to load usbccgp.sys, which is necessary for nusb to be able to list interfaces.
+    let state = static_cell::make_static!(State::new());
+    _ = CdcAcmClass::new(&mut builder, state, 64);
 
     // Start USB.
     let usb = builder.build();
