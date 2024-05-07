@@ -5,7 +5,7 @@
 use dap_rs::{
     dap::{Dap, DapLeds, DapVersion},
     swd::{self, APnDP, DPRegister},
-    swj::Dependencies,
+    swj::{Dependencies, Pins},
     swo::Swo,
 };
 use defmt::{info, panic, todo, unwrap, warn};
@@ -41,10 +41,11 @@ use static_cell::StaticCell;
 type MyDriver = Driver<'static>;
 
 // Pin configuration
-const TDI_PIN: u8 = 15;
+const NRESET_PIN: u8 = 15;
 const TMS_SWDIO_PIN: u8 = 16;
 const TCK_SWCLK_PIN: u8 = 17;
-const TDO_PIN: u8 = 18;
+const TDI_PIN: u8 = 18;
+const TDO_PIN: u8 = 8;
 
 #[embassy_executor::task]
 async fn usb_task(mut device: UsbDevice<'static, MyDriver>) {
@@ -62,10 +63,11 @@ async fn main(spawner: Spawner) -> () {
     let io = Io::new(peripherals.GPIO, peripherals.IO_MUX);
 
     // Pinout
-    let t_jtdi = io.pins.gpio15;
+    let t_nrst = io.pins.gpio15;
     let t_jtms_swdio = io.pins.gpio16;
     let t_jtck_swclk = io.pins.gpio17;
-    let t_jtdo = io.pins.gpio18;
+    let t_jtdi = io.pins.gpio18;
+    let t_jtdo = io.pins.gpio8;
     //let t_nrst = io.pins.gpio4;
     //let t_swo = io.pins.gpio5;
 
@@ -131,6 +133,7 @@ async fn main(spawner: Spawner) -> () {
 
     // Process DAP commands in a loop.
     let deps = Deps::new(
+        t_nrst,
         t_jtdi,
         t_jtms_swdio,
         t_jtck_swclk,
@@ -245,8 +248,9 @@ where
     }
 
     fn set_level(&mut self, level: Level) {
+        self.set_as_output();
         match self {
-            Self::Input(_) => panic!(),
+            Self::Input(_) => {}
             Self::Output(pin) => match level {
                 Level::Low => pin.set_low(),
                 Level::High => pin.set_high(),
@@ -284,10 +288,11 @@ where
         )
     }
 
-    fn is_high(&self) -> bool {
+    fn is_high(&mut self) -> bool {
+        self.set_as_input();
         match self {
             Self::Input(pin) => pin.is_high(),
-            Self::Output(_) => panic!(),
+            Self::Output(_) => todo!(),
         }
     }
 }
@@ -299,25 +304,31 @@ pub enum Dir {
 }
 
 struct Deps {
-    _tdi: Pin<TDI_PIN>,
+    nreset: Pin<NRESET_PIN>,
+    tdi: Pin<TDI_PIN>,
     tms_swdio: Pin<TMS_SWDIO_PIN>,
     tck_swclk: Pin<TCK_SWCLK_PIN>,
-    _tdo: Pin<TDO_PIN>,
+    tdo: Pin<TDO_PIN>,
     delay: Delay,
 }
 
 impl Deps {
     pub fn new(
+        nreset: GpioPin<Unknown, NRESET_PIN>,
         tdi: GpioPin<Unknown, TDI_PIN>,
         tms_swdio: GpioPin<Unknown, TMS_SWDIO_PIN>,
         tck_swclk: GpioPin<Unknown, TCK_SWCLK_PIN>,
         tdo: GpioPin<Unknown, TDO_PIN>,
         delay: Delay,
     ) -> Self {
+        let mut nreset = Pin::new(nreset);
         let mut tdi = Pin::new(tdi);
         let mut tms_swdio = Pin::new(tms_swdio);
         let mut tck_swclk = Pin::new(tck_swclk);
         let mut tdo = Pin::new(tdo);
+
+        nreset.set_as_output();
+        nreset.set_high();
 
         //io.set_pull(Pull::Up);
         tms_swdio.set_as_output();
@@ -330,10 +341,11 @@ impl Deps {
         tdo.set_as_output();
 
         Self {
-            _tdi: tdi,
+            nreset,
+            tdi,
             tms_swdio,
             tck_swclk,
-            _tdo: tdo,
+            tdo,
             delay,
         }
     }
@@ -424,7 +436,7 @@ impl Deps {
 }
 
 fn wait(delay: &mut Delay) {
-    delay.delay_micros(1);
+    delay.delay_nanos(500);
 }
 
 impl Dependencies<Deps, Deps> for Deps {
@@ -433,16 +445,40 @@ impl Dependencies<Deps, Deps> for Deps {
     }
 
     fn process_swj_clock(&mut self, max_frequency: u32) -> bool {
-        todo!()
+        true // TODO
     }
 
-    fn process_swj_pins(
-        &mut self,
-        output: dap_rs::swj::Pins,
-        mask: dap_rs::swj::Pins,
-        wait_us: u32,
-    ) -> dap_rs::swj::Pins {
-        todo!()
+    fn process_swj_pins(&mut self, output: Pins, mask: Pins, wait_us: u32) -> Pins {
+        if mask.contains(Pins::SWCLK) {
+            self.tck_swclk
+                .set_level(Level::from(output.contains(Pins::SWCLK)));
+        }
+        if mask.contains(Pins::SWDIO) {
+            self.tms_swdio
+                .set_level(Level::from(output.contains(Pins::SWDIO)));
+        }
+        if mask.contains(Pins::NRESET) {
+            self.nreset
+                .set_level(Level::from(output.contains(Pins::NRESET)));
+        }
+        if mask.contains(Pins::TDO) {
+            self.tdo.set_level(Level::from(output.contains(Pins::TDO)));
+        }
+
+        if wait_us != 0 {
+            self.delay.delay_micros(wait_us);
+        }
+
+        let mut read = Pins::empty();
+
+        read.set(Pins::SWCLK, self.tck_swclk.is_high());
+        read.set(Pins::SWDIO, self.tms_swdio.is_high());
+        read.set(Pins::NRESET, self.nreset.is_high());
+        read.set(Pins::TDO, self.tdo.is_high());
+        read.set(Pins::TDI, self.tdi.is_high());
+        read.set(Pins::NTRST, true);
+
+        read
     }
 
     fn process_swj_sequence(&mut self, data: &[u8], mut nbits: usize) {
@@ -450,8 +486,9 @@ impl Dependencies<Deps, Deps> for Deps {
             if nbits == 0 {
                 break;
             }
-            self.shift_out(b as u32, nbits.min(8) as u32);
-            nbits -= 8;
+            let bits = nbits.min(8);
+            self.shift_out(b as u32, bits as u32);
+            nbits -= bits;
         }
     }
 }
