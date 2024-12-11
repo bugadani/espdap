@@ -23,16 +23,16 @@ use esp_backtrace as _;
 use esp_hal::{
     clock::ClockControl,
     delay::Delay,
-    embassy,
-    gpio::{Floating, GpioPin, GpioProperties, Input, Io, IsOutputPin, Output, PushPull, Unknown},
+    gpio::{GpioPin, Input, InputPin, Io, Level, Output, OutputPin, Pull},
     otg_fs::{
         asynch::{Config, Driver},
         Usb,
     },
+    peripheral::Peripheral,
     peripherals::Peripherals,
     prelude::*,
     system::SystemControl,
-    systimer::SystemTimer,
+    timer::timg::TimerGroup,
 };
 #[cfg(feature = "esp32s2")]
 use esp_println as _;
@@ -59,7 +59,8 @@ async fn main(spawner: Spawner) -> () {
     let system = SystemControl::new(peripherals.SYSTEM);
     let clocks = ClockControl::boot_defaults(system.clock_control).freeze();
 
-    embassy::init(&clocks, SystemTimer::new_async(peripherals.SYSTIMER));
+    let timg0 = TimerGroup::new_async(peripherals.TIMG0, &clocks);
+    esp_hal_embassy::init(&clocks, timg0);
     let io = Io::new(peripherals.GPIO, peripherals.IO_MUX);
 
     // Pinout
@@ -209,44 +210,43 @@ impl Handler for Control {
     }
 }
 
-enum Level {
-    Low,
-    High,
+trait FlexibleGpio: InputPin + OutputPin + Peripheral<P = Self> + 'static {
+    unsafe fn conjure() -> Self;
 }
 
-impl From<bool> for Level {
-    fn from(b: bool) -> Self {
-        if b {
-            Self::High
-        } else {
-            Self::Low
+macro_rules! flex {
+    () => {};
+    ($pin:literal $(, $rest:literal)*) => {
+        impl FlexibleGpio for GpioPin<$pin> {
+            unsafe fn conjure() -> Self {
+                Self
+            }
         }
+        flex!($($rest),*);
+    };
+}
+
+flex!(15, 16, 17, 18, 8);
+
+enum Pin<P: FlexibleGpio> {
+    Input(Input<'static, P>),
+    Output(Output<'static, P>),
+}
+
+impl<P: FlexibleGpio> Pin<P> {
+    fn input() -> Self {
+        Self::Input(Input::new(unsafe { P::conjure() }, Pull::None))
     }
-}
 
-enum Pin<const IO: u8>
-where
-    GpioPin<Input<Floating>, IO>: GpioProperties,
-    GpioPin<Output<PushPull>, IO>: GpioProperties,
-    <GpioPin<Input<Floating>, IO> as GpioProperties>::PinType: IsOutputPin,
-    <GpioPin<Output<PushPull>, IO> as GpioProperties>::PinType: IsOutputPin,
-{
-    Input(GpioPin<Input<Floating>, IO>),
-    Output(GpioPin<Output<PushPull>, IO>),
-}
+    fn output() -> Self {
+        let pin = unsafe { P::conjure() };
 
-impl<const IO: u8> Pin<IO>
-where
-    GpioPin<Input<Floating>, IO>: GpioProperties,
-    GpioPin<Output<PushPull>, IO>: GpioProperties,
-    <GpioPin<Input<Floating>, IO> as GpioProperties>::PinType: IsOutputPin,
-    <GpioPin<Output<PushPull>, IO> as GpioProperties>::PinType: IsOutputPin,
-{
-    fn new(pin: GpioPin<Unknown, IO>) -> Self
-    where
-        GpioPin<Unknown, IO>: GpioProperties,
-    {
-        Self::Input(pin.into_floating_input())
+        let level = pin.is_set_high(unsafe { core::mem::transmute(()) });
+        Self::Output(Output::new(pin, level.into()))
+    }
+
+    fn new(_: P) -> Self {
+        Self::input()
     }
 
     fn set_level(&mut self, level: Level) {
@@ -273,7 +273,7 @@ where
             self,
             || panic!(),
             |pin| match pin {
-                Self::Input(pin) => Self::Output(pin.into_push_pull_output()),
+                Self::Input(_) => Self::output(),
                 Self::Output(_) => pin,
             },
         )
@@ -285,7 +285,7 @@ where
             || panic!(),
             |pin| match pin {
                 Self::Input(_) => pin,
-                Self::Output(pin) => Self::Input(pin.into_floating_input()),
+                Self::Output(_pin) => Self::input(),
             },
         )
     }
@@ -306,21 +306,21 @@ pub enum Dir {
 }
 
 struct Deps {
-    nreset: Pin<NRESET_PIN>,
-    tdi: Pin<TDI_PIN>,
-    tms_swdio: Pin<TMS_SWDIO_PIN>,
-    tck_swclk: Pin<TCK_SWCLK_PIN>,
-    tdo: Pin<TDO_PIN>,
+    nreset: Pin<GpioPin<NRESET_PIN>>,
+    tdi: Pin<GpioPin<TDI_PIN>>,
+    tms_swdio: Pin<GpioPin<TMS_SWDIO_PIN>>,
+    tck_swclk: Pin<GpioPin<TCK_SWCLK_PIN>>,
+    tdo: Pin<GpioPin<TDO_PIN>>,
     delay: Delay,
 }
 
 impl Deps {
     pub fn new(
-        nreset: GpioPin<Unknown, NRESET_PIN>,
-        tdi: GpioPin<Unknown, TDI_PIN>,
-        tms_swdio: GpioPin<Unknown, TMS_SWDIO_PIN>,
-        tck_swclk: GpioPin<Unknown, TCK_SWCLK_PIN>,
-        tdo: GpioPin<Unknown, TDO_PIN>,
+        nreset: GpioPin<NRESET_PIN>,
+        tdi: GpioPin<TDI_PIN>,
+        tms_swdio: GpioPin<TMS_SWDIO_PIN>,
+        tck_swclk: GpioPin<TCK_SWCLK_PIN>,
+        tdo: GpioPin<TDO_PIN>,
         delay: Delay,
     ) -> Self {
         let mut nreset = Pin::new(nreset);

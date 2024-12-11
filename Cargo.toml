@@ -5,13 +5,11 @@ edition = "2021"
 
 [dependencies]
 esp-println = { version = "0.12", features = ["defmt-espflash", "esp32s2", "critical-section"], optional = true }
-esp-hal = { git = "https://github.com/bugadani/esp-hal.git", branch = "usb", features = [
+esp-hal = { version = "0.18", features = [
     "async",
-    "embassy",
-    "embassy-executor-thread",
-    "embassy-executor-interrupt",
     "embedded-hal-02"
 ] }
+esp-hal-embassy = { version = "0.1.0", features = ["time-timg0"] }
 esp-backtrace = { version = "0.14.2", features = ["exception-handler", "panic-handler", "defmt"] }
 
 defmt = "0.3"
@@ -25,5 +23,5 @@ replace_with = { version = "0.1.7", default-features = false }
 
 [features]
 default = ["esp32s2"]
-esp32s2 = ["esp-hal/esp32s2", "esp-backtrace/esp32s2", "esp-hal/embassy-time-systick-80mhz", "esp-println"]
-esp32s3 = ["esp-hal/esp32s3", "esp-backtrace/esp32s3", "esp-hal/embassy-time-systick-16mhz", "defmt-rtt"]
+esp32s2 = ["esp-hal/esp32s2", "esp-backtrace/esp32s2", "esp-hal-embassy/esp32s2", "esp-println"]
+esp32s3 = ["esp-hal/esp32s3", "esp-backtrace/esp32s3", "esp-hal-embassy/esp32s3", "defmt-rtt"]
