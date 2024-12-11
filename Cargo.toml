@@ -18,7 +18,7 @@ defmt = "0.3"
 defmt-rtt = { version = "0.4", optional = true }
 
 static_cell = { version = "2.0.0", features = ["nightly"] }
-dap-rs = { git = "https://github.com/korken89/dap-rs.git", features = [ "defmt" ] }
+dap-rs = { git = "https://github.com/korken89/dap-rs.git", features = [ "defmt" ], rev = "4d083aaa7e75db2546356669b1b81b2f0cff287d" }
 embassy-executor = { version = "0.5.0", features = ["task-arena-size-40960", "defmt"] }
 embassy-usb = { git = "https://github.com/embassy-rs/embassy.git", version = "0.2.0", default-features = false, features = ["defmt"] }
 replace_with = { version = "0.1.7", default-features = false }
