@@ -55,18 +55,16 @@ async fn main(spawner: Spawner) -> () {
     let timg0 = TimerGroup::new(peripherals.TIMG0);
     esp_hal_embassy::init(timg0.timer0);
 
-    let io = Io::new(peripherals.GPIO, peripherals.IO_MUX);
-
     // Pinout
-    let t_nrst = io.pins.gpio15;
-    let t_jtms_swdio = io.pins.gpio16;
-    let t_jtck_swclk = io.pins.gpio17;
-    let t_jtdi = io.pins.gpio18;
-    let t_jtdo = io.pins.gpio8;
-    //let t_nrst = io.pins.gpio4;
-    //let t_swo = io.pins.gpio5;
+    let t_nrst = peripherals.GPIO15;
+    let t_jtms_swdio = peripherals.GPIO16;
+    let t_jtck_swclk = peripherals.GPIO17;
+    let t_jtdi = peripherals.GPIO18;
+    let t_jtdo = peripherals.GPIO8;
+    //let t_nrst = peripherals.GPIO4;
+    //let t_swo = peripherals.GPIO5;
 
-    let usb = Usb::new(peripherals.USB0, io.pins.gpio20, io.pins.gpio19);
+    let usb = Usb::new(peripherals.USB0, peripherals.GPIO20, peripherals.GPIO19);
 
     // Create the driver, from the HAL.
     static STATIC_EP_OUT_BUFFER: StaticCell<[u8; 1024]> = StaticCell::new();
