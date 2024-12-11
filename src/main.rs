@@ -8,7 +8,7 @@ use dap_rs::{
     swj::{Dependencies, Pins},
     swo::Swo,
 };
-use defmt::{info, panic, todo, unwrap, warn};
+use defmt::{info, todo, unwrap, warn};
 #[cfg(feature = "esp32s3")]
 use defmt_rtt as _;
 use embassy_executor::Spawner;
@@ -21,18 +21,14 @@ use embassy_usb::{
 };
 use esp_backtrace as _;
 use esp_hal::{
-    clock::ClockControl,
     delay::Delay,
-    embassy,
-    gpio::{Floating, GpioPin, GpioProperties, Input, Io, IsOutputPin, Output, PushPull, Unknown},
+    gpio::{Flex, GpioPin, Level, Pull},
     otg_fs::{
         asynch::{Config, Driver},
         Usb,
     },
-    peripherals::Peripherals,
     prelude::*,
-    system::SystemControl,
-    systimer::SystemTimer,
+    timer::systimer::SystemTimer,
 };
 #[cfg(feature = "esp32s2")]
 use esp_println as _;
@@ -41,37 +37,42 @@ use static_cell::StaticCell;
 type MyDriver = Driver<'static>;
 
 // Pin configuration
-const NRESET_PIN: u8 = 15;
-const TMS_SWDIO_PIN: u8 = 16;
-const TCK_SWCLK_PIN: u8 = 17;
-const TDI_PIN: u8 = 18;
-const TDO_PIN: u8 = 8;
+type NresetPin = GpioPin<15>;
+type TmsSwdioPin = GpioPin<16>;
+type TckSwclkPin = GpioPin<17>;
+type TdiPin = GpioPin<18>;
+type TdoPin = GpioPin<8>;
 
 #[embassy_executor::task]
 async fn usb_task(mut device: UsbDevice<'static, MyDriver>) {
     device.run().await;
 }
 
+struct OldDelay;
+
+impl embedded_hal_02::blocking::delay::DelayUs<u32> for OldDelay {
+    fn delay_us(&mut self, us: u32) {
+        Delay::new().delay_micros(us);
+    }
+}
+
 #[main]
 async fn main(spawner: Spawner) -> () {
+    let peripherals = esp_hal::init(esp_hal::Config::default());
     info!("Init!");
-    let peripherals = Peripherals::take();
-    let system = SystemControl::new(peripherals.SYSTEM);
-    let clocks = ClockControl::boot_defaults(system.clock_control).freeze();
 
-    embassy::init(&clocks, SystemTimer::new_async(peripherals.SYSTIMER));
-    let io = Io::new(peripherals.GPIO, peripherals.IO_MUX);
+    esp_hal_embassy::init(SystemTimer::new(peripherals.SYSTIMER).alarm0);
 
     // Pinout
-    let t_nrst = io.pins.gpio15;
-    let t_jtms_swdio = io.pins.gpio16;
-    let t_jtck_swclk = io.pins.gpio17;
-    let t_jtdi = io.pins.gpio18;
-    let t_jtdo = io.pins.gpio8;
-    //let t_nrst = io.pins.gpio4;
-    //let t_swo = io.pins.gpio5;
+    let t_nrst = peripherals.GPIO15;
+    let t_jtms_swdio = peripherals.GPIO16;
+    let t_jtck_swclk = peripherals.GPIO17;
+    let t_jtdi = peripherals.GPIO18;
+    let t_jtdo = peripherals.GPIO8;
+    //let t_nrst = peripherals.GPIO4;
+    //let t_swo = peripherals.GPIO5;
 
-    let usb = Usb::new(peripherals.USB0, io.pins.gpio19, io.pins.gpio20);
+    let usb = Usb::new(peripherals.USB0, peripherals.GPIO20, peripherals.GPIO19);
 
     // Create the driver, from the HAL.
     static STATIC_EP_OUT_BUFFER: StaticCell<[u8; 1024]> = StaticCell::new();
@@ -140,16 +141,10 @@ async fn main(spawner: Spawner) -> () {
         t_jtms_swdio,
         t_jtck_swclk,
         t_jtdo,
-        Delay::new(&clocks),
+        Delay::new(),
     );
 
-    let mut dap = Dap::new(
-        deps,
-        Leds,
-        Delay::new(&clocks),
-        None::<NoSwo>,
-        "Embassy CMSIS-DAP",
-    );
+    let mut dap = Dap::new(deps, Leds, OldDelay, None::<NoSwo>, "Embassy CMSIS-DAP");
 
     let mut req = [0u8; 1024];
     let mut resp = [0u8; 1024];
@@ -209,96 +204,6 @@ impl Handler for Control {
     }
 }
 
-enum Level {
-    Low,
-    High,
-}
-
-impl From<bool> for Level {
-    fn from(b: bool) -> Self {
-        if b {
-            Self::High
-        } else {
-            Self::Low
-        }
-    }
-}
-
-enum Pin<const IO: u8>
-where
-    GpioPin<Input<Floating>, IO>: GpioProperties,
-    GpioPin<Output<PushPull>, IO>: GpioProperties,
-    <GpioPin<Input<Floating>, IO> as GpioProperties>::PinType: IsOutputPin,
-    <GpioPin<Output<PushPull>, IO> as GpioProperties>::PinType: IsOutputPin,
-{
-    Input(GpioPin<Input<Floating>, IO>),
-    Output(GpioPin<Output<PushPull>, IO>),
-}
-
-impl<const IO: u8> Pin<IO>
-where
-    GpioPin<Input<Floating>, IO>: GpioProperties,
-    GpioPin<Output<PushPull>, IO>: GpioProperties,
-    <GpioPin<Input<Floating>, IO> as GpioProperties>::PinType: IsOutputPin,
-    <GpioPin<Output<PushPull>, IO> as GpioProperties>::PinType: IsOutputPin,
-{
-    fn new(pin: GpioPin<Unknown, IO>) -> Self
-    where
-        GpioPin<Unknown, IO>: GpioProperties,
-    {
-        Self::Input(pin.into_floating_input())
-    }
-
-    fn set_level(&mut self, level: Level) {
-        self.set_as_output();
-        match self {
-            Self::Input(_) => {}
-            Self::Output(pin) => match level {
-                Level::Low => pin.set_low(),
-                Level::High => pin.set_high(),
-            },
-        }
-    }
-
-    fn set_high(&mut self) {
-        self.set_level(Level::High)
-    }
-
-    fn set_low(&mut self) {
-        self.set_level(Level::Low)
-    }
-
-    fn set_as_output(&mut self) {
-        replace_with::replace_with(
-            self,
-            || panic!(),
-            |pin| match pin {
-                Self::Input(pin) => Self::Output(pin.into_push_pull_output()),
-                Self::Output(_) => pin,
-            },
-        )
-    }
-
-    fn set_as_input(&mut self) {
-        replace_with::replace_with(
-            self,
-            || panic!(),
-            |pin| match pin {
-                Self::Input(_) => pin,
-                Self::Output(pin) => Self::Input(pin.into_floating_input()),
-            },
-        )
-    }
-
-    fn is_high(&mut self) -> bool {
-        self.set_as_input();
-        match self {
-            Self::Input(pin) => pin.is_high(),
-            Self::Output(_) => todo!(),
-        }
-    }
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, defmt::Format)]
 pub enum Dir {
     Write = 0,
@@ -306,28 +211,28 @@ pub enum Dir {
 }
 
 struct Deps {
-    nreset: Pin<NRESET_PIN>,
-    tdi: Pin<TDI_PIN>,
-    tms_swdio: Pin<TMS_SWDIO_PIN>,
-    tck_swclk: Pin<TCK_SWCLK_PIN>,
-    tdo: Pin<TDO_PIN>,
+    nreset: Flex<'static, NresetPin>,
+    tdi: Flex<'static, TdiPin>,
+    tms_swdio: Flex<'static, TmsSwdioPin>,
+    tck_swclk: Flex<'static, TckSwclkPin>,
+    tdo: Flex<'static, TdoPin>,
     delay: Delay,
 }
 
 impl Deps {
     pub fn new(
-        nreset: GpioPin<Unknown, NRESET_PIN>,
-        tdi: GpioPin<Unknown, TDI_PIN>,
-        tms_swdio: GpioPin<Unknown, TMS_SWDIO_PIN>,
-        tck_swclk: GpioPin<Unknown, TCK_SWCLK_PIN>,
-        tdo: GpioPin<Unknown, TDO_PIN>,
+        nreset: NresetPin,
+        tdi: TdiPin,
+        tms_swdio: TmsSwdioPin,
+        tck_swclk: TckSwclkPin,
+        tdo: TdoPin,
         delay: Delay,
     ) -> Self {
-        let mut nreset = Pin::new(nreset);
-        let mut tdi = Pin::new(tdi);
-        let mut tms_swdio = Pin::new(tms_swdio);
-        let mut tck_swclk = Pin::new(tck_swclk);
-        let mut tdo = Pin::new(tdo);
+        let mut nreset = Flex::new_typed(nreset);
+        let mut tdi = Flex::new_typed(tdi);
+        let mut tms_swdio = Flex::new_typed(tms_swdio);
+        let mut tck_swclk = Flex::new_typed(tck_swclk);
+        let mut tdo = Flex::new_typed(tdo);
 
         nreset.set_as_output();
         nreset.set_high();
@@ -339,7 +244,7 @@ impl Deps {
         //ck.set_pull(Pull::None);
         tck_swclk.set_as_output();
 
-        tdi.set_as_input();
+        tdi.set_as_input(Pull::None);
         tdo.set_as_output();
 
         Self {
@@ -420,7 +325,7 @@ impl Deps {
     }
 
     fn shift_in(&mut self, n: u32) -> u32 {
-        self.tms_swdio.set_as_input();
+        self.tms_swdio.set_as_input(Pull::None);
         let mut val = 0;
         for i in 0..n {
             val |= (self.tms_swdio.is_high() as u32) << i;
@@ -446,7 +351,7 @@ impl Dependencies<Deps, Deps> for Deps {
         // todo
     }
 
-    fn process_swj_clock(&mut self, max_frequency: u32) -> bool {
+    fn process_swj_clock(&mut self, _max_frequency: u32) -> bool {
         true // TODO
     }
 
@@ -506,7 +411,7 @@ impl dap_rs::swd::Swd<Deps> for Deps {
         self.write(port, addr, data)
     }
 
-    fn set_clock(&mut self, max_frequency: u32) -> bool {
+    fn set_clock(&mut self, _max_frequency: u32) -> bool {
         // todo
         true
     }
@@ -515,11 +420,11 @@ impl dap_rs::swd::Swd<Deps> for Deps {
 impl dap_rs::jtag::Jtag<Deps> for Deps {
     const AVAILABLE: bool = false;
 
-    fn sequences(&mut self, data: &[u8], rxbuf: &mut [u8]) -> u32 {
+    fn sequences(&mut self, _data: &[u8], _rxbuf: &mut [u8]) -> u32 {
         todo!()
     }
 
-    fn set_clock(&mut self, max_frequency: u32) -> bool {
+    fn set_clock(&mut self, _max_frequency: u32) -> bool {
         todo!()
     }
 }
@@ -527,7 +432,7 @@ impl dap_rs::jtag::Jtag<Deps> for Deps {
 struct Leds;
 
 impl DapLeds for Leds {
-    fn react_to_host_status(&mut self, host_status: dap_rs::dap::HostStatus) {
+    fn react_to_host_status(&mut self, _host_status: dap_rs::dap::HostStatus) {
         // TODO
     }
 }
@@ -535,23 +440,23 @@ impl DapLeds for Leds {
 struct NoSwo;
 
 impl Swo for NoSwo {
-    fn set_transport(&mut self, transport: dap_rs::swo::SwoTransport) {
+    fn set_transport(&mut self, _transport: dap_rs::swo::SwoTransport) {
         todo!()
     }
 
-    fn set_mode(&mut self, mode: dap_rs::swo::SwoMode) {
+    fn set_mode(&mut self, _mode: dap_rs::swo::SwoMode) {
         todo!()
     }
 
-    fn set_baudrate(&mut self, baudrate: u32) -> u32 {
+    fn set_baudrate(&mut self, _baudrate: u32) -> u32 {
         todo!()
     }
 
-    fn set_control(&mut self, control: dap_rs::swo::SwoControl) {
+    fn set_control(&mut self, _control: dap_rs::swo::SwoControl) {
         todo!()
     }
 
-    fn polling_data(&mut self, buf: &mut [u8]) -> u32 {
+    fn polling_data(&mut self, _buf: &mut [u8]) -> u32 {
         todo!()
     }
 

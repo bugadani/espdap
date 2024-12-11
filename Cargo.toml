@@ -5,13 +5,13 @@ edition = "2021"
 
 [dependencies]
 esp-println = { version = "0.12", features = ["defmt-espflash", "esp32s2", "critical-section"], optional = true }
-esp-hal = { git = "https://github.com/bugadani/esp-hal.git", branch = "usb", features = [
-    "async",
-    "embassy",
-    "embassy-executor-thread",
-    "embassy-executor-interrupt",
-    "embedded-hal-02"
-] }
+
+#esp-hal = { version = "0.22", git = "https://github.com/kaspar030/esp-hal.git", branch = "drop_usb_otg_fs_quirk", features = ["unstable"] }
+#esp-hal-embassy = { version = "0.5", git = "https://github.com/kaspar030/esp-hal.git", branch = "drop_usb_otg_fs_quirk", features = [] }
+
+esp-hal = { version = "0.22", git = "https://github.com/esp-rs/esp-hal.git", features = ["unstable"] }
+esp-hal-embassy = { version = "0.5", git = "https://github.com/esp-rs/esp-hal.git", features = [] }
+
 esp-backtrace = { version = "0.14.2", features = ["exception-handler", "panic-handler", "defmt"] }
 
 defmt = "0.3"
@@ -19,11 +19,12 @@ defmt-rtt = { version = "0.4", optional = true }
 
 static_cell = { version = "2.0.0", features = ["nightly"] }
 dap-rs = { git = "https://github.com/korken89/dap-rs.git", features = [ "defmt" ], rev = "4d083aaa7e75db2546356669b1b81b2f0cff287d" }
-embassy-executor = { version = "0.5.0", features = ["task-arena-size-40960", "defmt"] }
+embassy-executor = { version = "0.6.3", features = ["task-arena-size-40960", "defmt"] }
 embassy-usb = { version = "0.2.0", default-features = false, features = ["defmt"] }
 replace_with = { version = "0.1.7", default-features = false }
+embedded_hal_02 = { package = "embedded-hal", version = "0.2" }
 
 [features]
 default = ["esp32s2"]
-esp32s2 = ["esp-hal/esp32s2", "esp-backtrace/esp32s2", "esp-hal/embassy-time-systick-80mhz", "esp-println"]
-esp32s3 = ["esp-hal/esp32s3", "esp-backtrace/esp32s3", "esp-hal/embassy-time-systick-16mhz", "defmt-rtt"]
+esp32s2 = ["esp-hal/esp32s2", "esp-hal-embassy/esp32s2", "esp-backtrace/esp32s2", "esp-println"]
+esp32s3 = ["esp-hal/esp32s3", "esp-hal-embassy/esp32s3", "esp-backtrace/esp32s3", "defmt-rtt"]
