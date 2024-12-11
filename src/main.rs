@@ -8,7 +8,7 @@ use dap_rs::{
     swj::{Dependencies, Pins},
     swo::Swo,
 };
-use defmt::{info, panic, todo, unwrap, warn};
+use defmt::{info, todo, unwrap, warn};
 #[cfg(feature = "esp32s3")]
 use defmt_rtt as _;
 use embassy_executor::Spawner;
@@ -23,16 +23,15 @@ use esp_backtrace as _;
 use esp_hal::{
     clock::ClockControl,
     delay::Delay,
-    gpio::{GpioPin, Input, InputPin, Io, Level, Output, OutputPin, Pull},
+    gpio::{Flex, GpioPin, Io, Level, Pull},
     otg_fs::{
         asynch::{Config, Driver},
         Usb,
     },
-    peripheral::Peripheral,
     peripherals::Peripherals,
     prelude::*,
     system::SystemControl,
-    timer::timg::TimerGroup,
+    timer::{timg::TimerGroup, ErasedTimer, OneShotTimer},
 };
 #[cfg(feature = "esp32s2")]
 use esp_println as _;
@@ -59,8 +58,11 @@ async fn main(spawner: Spawner) -> () {
     let system = SystemControl::new(peripherals.SYSTEM);
     let clocks = ClockControl::boot_defaults(system.clock_control).freeze();
 
-    let timg0 = TimerGroup::new_async(peripherals.TIMG0, &clocks);
-    esp_hal_embassy::init(&clocks, timg0);
+    let timg0 = TimerGroup::new(peripherals.TIMG0, &clocks, None);
+    static STATIC_TIMERS: StaticCell<[OneShotTimer<ErasedTimer>; 1]> = StaticCell::new();
+    let timers = STATIC_TIMERS.init([OneShotTimer::new(timg0.timer0.into())]);
+    esp_hal_embassy::init(&clocks, timers);
+
     let io = Io::new(peripherals.GPIO, peripherals.IO_MUX);
 
     // Pinout
@@ -72,7 +74,7 @@ async fn main(spawner: Spawner) -> () {
     //let t_nrst = io.pins.gpio4;
     //let t_swo = io.pins.gpio5;
 
-    let usb = Usb::new(peripherals.USB0, io.pins.gpio19, io.pins.gpio20);
+    let usb = Usb::new(peripherals.USB0, io.pins.gpio20, io.pins.gpio19);
 
     // Create the driver, from the HAL.
     static STATIC_EP_OUT_BUFFER: StaticCell<[u8; 1024]> = StaticCell::new();
@@ -210,95 +212,6 @@ impl Handler for Control {
     }
 }
 
-trait FlexibleGpio: InputPin + OutputPin + Peripheral<P = Self> + 'static {
-    unsafe fn conjure() -> Self;
-}
-
-macro_rules! flex {
-    () => {};
-    ($pin:literal $(, $rest:literal)*) => {
-        impl FlexibleGpio for GpioPin<$pin> {
-            unsafe fn conjure() -> Self {
-                Self
-            }
-        }
-        flex!($($rest),*);
-    };
-}
-
-flex!(15, 16, 17, 18, 8);
-
-enum Pin<P: FlexibleGpio> {
-    Input(Input<'static, P>),
-    Output(Output<'static, P>),
-}
-
-impl<P: FlexibleGpio> Pin<P> {
-    fn input() -> Self {
-        Self::Input(Input::new(unsafe { P::conjure() }, Pull::None))
-    }
-
-    fn output() -> Self {
-        let pin = unsafe { P::conjure() };
-
-        let level = pin.is_set_high(unsafe { core::mem::transmute(()) });
-        Self::Output(Output::new(pin, level.into()))
-    }
-
-    fn new(_: P) -> Self {
-        Self::input()
-    }
-
-    fn set_level(&mut self, level: Level) {
-        self.set_as_output();
-        match self {
-            Self::Input(_) => {}
-            Self::Output(pin) => match level {
-                Level::Low => pin.set_low(),
-                Level::High => pin.set_high(),
-            },
-        }
-    }
-
-    fn set_high(&mut self) {
-        self.set_level(Level::High)
-    }
-
-    fn set_low(&mut self) {
-        self.set_level(Level::Low)
-    }
-
-    fn set_as_output(&mut self) {
-        replace_with::replace_with(
-            self,
-            || panic!(),
-            |pin| match pin {
-                Self::Input(_) => Self::output(),
-                Self::Output(_) => pin,
-            },
-        )
-    }
-
-    fn set_as_input(&mut self) {
-        replace_with::replace_with(
-            self,
-            || panic!(),
-            |pin| match pin {
-                Self::Input(_) => pin,
-                Self::Output(_pin) => Self::input(),
-            },
-        )
-    }
-
-    fn is_high(&mut self) -> bool {
-        self.set_as_input();
-        match self {
-            Self::Input(pin) => pin.is_high(),
-            Self::Output(_) => todo!(),
-        }
-    }
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, defmt::Format)]
 pub enum Dir {
     Write = 0,
@@ -306,11 +219,11 @@ pub enum Dir {
 }
 
 struct Deps {
-    nreset: Pin<GpioPin<NRESET_PIN>>,
-    tdi: Pin<GpioPin<TDI_PIN>>,
-    tms_swdio: Pin<GpioPin<TMS_SWDIO_PIN>>,
-    tck_swclk: Pin<GpioPin<TCK_SWCLK_PIN>>,
-    tdo: Pin<GpioPin<TDO_PIN>>,
+    nreset: Flex<'static, GpioPin<NRESET_PIN>>,
+    tdi: Flex<'static, GpioPin<TDI_PIN>>,
+    tms_swdio: Flex<'static, GpioPin<TMS_SWDIO_PIN>>,
+    tck_swclk: Flex<'static, GpioPin<TCK_SWCLK_PIN>>,
+    tdo: Flex<'static, GpioPin<TDO_PIN>>,
     delay: Delay,
 }
 
@@ -323,11 +236,11 @@ impl Deps {
         tdo: GpioPin<TDO_PIN>,
         delay: Delay,
     ) -> Self {
-        let mut nreset = Pin::new(nreset);
-        let mut tdi = Pin::new(tdi);
-        let mut tms_swdio = Pin::new(tms_swdio);
-        let mut tck_swclk = Pin::new(tck_swclk);
-        let mut tdo = Pin::new(tdo);
+        let mut nreset = Flex::new(nreset);
+        let mut tdi = Flex::new(tdi);
+        let mut tms_swdio = Flex::new(tms_swdio);
+        let mut tck_swclk = Flex::new(tck_swclk);
+        let mut tdo = Flex::new(tdo);
 
         nreset.set_as_output();
         nreset.set_high();
@@ -339,7 +252,7 @@ impl Deps {
         //ck.set_pull(Pull::None);
         tck_swclk.set_as_output();
 
-        tdi.set_as_input();
+        tdi.set_as_input(Pull::None);
         tdo.set_as_output();
 
         Self {
@@ -420,7 +333,7 @@ impl Deps {
     }
 
     fn shift_in(&mut self, n: u32) -> u32 {
-        self.tms_swdio.set_as_input();
+        self.tms_swdio.set_as_input(Pull::None);
         let mut val = 0;
         for i in 0..n {
             val |= (self.tms_swdio.is_high() as u32) << i;
