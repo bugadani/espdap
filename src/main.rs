@@ -20,17 +20,14 @@ use embassy_usb::{
 };
 use esp_backtrace as _;
 use esp_hal::{
-    clock::ClockControl,
     delay::Delay,
     gpio::{Flex, GpioPin, Io, Level, Pull},
     otg_fs::{
         asynch::{Config, Driver},
         Usb,
     },
-    peripherals::Peripherals,
     prelude::*,
-    system::SystemControl,
-    timer::{timg::TimerGroup, ErasedTimer, OneShotTimer},
+    timer::timg::TimerGroup,
 };
 #[cfg(feature = "esp-println")]
 use esp_println as _;
@@ -53,14 +50,10 @@ async fn usb_task(mut device: UsbDevice<'static, MyDriver>) {
 #[main]
 async fn main(spawner: Spawner) -> () {
     info!("Init!");
-    let peripherals = Peripherals::take();
-    let system = SystemControl::new(peripherals.SYSTEM);
-    let clocks = ClockControl::boot_defaults(system.clock_control).freeze();
+    let peripherals = esp_hal::init(esp_hal::Config::default());
 
-    let timg0 = TimerGroup::new(peripherals.TIMG0, &clocks);
-    static STATIC_TIMERS: StaticCell<[OneShotTimer<ErasedTimer>; 1]> = StaticCell::new();
-    let timers = STATIC_TIMERS.init([OneShotTimer::new(ErasedTimer::from(timg0.timer0))]);
-    esp_hal_embassy::init(&clocks, timers);
+    let timg0 = TimerGroup::new(peripherals.TIMG0);
+    esp_hal_embassy::init(timg0.timer0);
 
     let io = Io::new(peripherals.GPIO, peripherals.IO_MUX);
 
@@ -142,16 +135,10 @@ async fn main(spawner: Spawner) -> () {
         t_jtms_swdio,
         t_jtck_swclk,
         t_jtdo,
-        Delay::new(&clocks),
+        Delay::new(),
     );
 
-    let mut dap = Dap::new(
-        deps,
-        Leds,
-        Delay::new(&clocks),
-        None::<NoSwo>,
-        "Embassy CMSIS-DAP",
-    );
+    let mut dap = Dap::new(deps, Leds, Delay::new(), None::<NoSwo>, "Embassy CMSIS-DAP");
 
     let mut req = [0u8; 1024];
     let mut resp = [0u8; 1024];
@@ -235,11 +222,11 @@ impl Deps {
         tdo: GpioPin<TDO_PIN>,
         delay: Delay,
     ) -> Self {
-        let mut nreset = Flex::new(nreset);
-        let mut tdi = Flex::new(tdi);
-        let mut tms_swdio = Flex::new(tms_swdio);
-        let mut tck_swclk = Flex::new(tck_swclk);
-        let mut tdo = Flex::new(tdo);
+        let mut nreset = Flex::new_typed(nreset);
+        let mut tdi = Flex::new_typed(tdi);
+        let mut tms_swdio = Flex::new_typed(tms_swdio);
+        let mut tck_swclk = Flex::new_typed(tck_swclk);
+        let mut tdo = Flex::new_typed(tdo);
 
         nreset.set_as_output();
         nreset.set_high();
