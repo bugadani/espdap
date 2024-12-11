@@ -74,7 +74,8 @@ async fn main(spawner: Spawner) -> () {
     let usb = Usb::new(peripherals.USB0, io.pins.gpio19, io.pins.gpio20);
 
     // Create the driver, from the HAL.
-    let ep_out_buffer = static_cell::make_static!([0u8; 1024]);
+    static STATIC_EP_OUT_BUFFER: StaticCell<[u8; 1024]> = StaticCell::new();
+    let ep_out_buffer = STATIC_EP_OUT_BUFFER.init([0u8; 1024]);
     let config = Config::default();
     let driver = Driver::new(usb, ep_out_buffer, config);
 
@@ -124,7 +125,8 @@ async fn main(spawner: Spawner) -> () {
 
     // CDC - dummy class to get things working for now. Windows needs more than one interface
     // to load usbccgp.sys, which is necessary for nusb to be able to list interfaces.
-    let state = static_cell::make_static!(State::new());
+    static STATIC_STATE: StaticCell<State> = StaticCell::new();
+    let state = STATIC_STATE.init(State::new());
     _ = CdcAcmClass::new(&mut builder, state, 64);
 
     // Start USB.
