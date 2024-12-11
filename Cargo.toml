@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-esp-println = { version = "0.12", features = ["defmt-espflash", "esp32s2", "critical-section"], optional = true }
+esp-println = { version = "0.12", features = ["defmt-espflash", "critical-section"], optional = true }
 
 #esp-hal = { version = "0.22", git = "https://github.com/kaspar030/esp-hal.git", branch = "drop_usb_otg_fs_quirk", features = ["unstable"] }
 #esp-hal-embassy = { version = "0.5", git = "https://github.com/kaspar030/esp-hal.git", branch = "drop_usb_otg_fs_quirk", features = [] }
@@ -25,6 +25,6 @@ replace_with = { version = "0.1.7", default-features = false }
 embedded_hal_02 = { package = "embedded-hal", version = "0.2" }
 
 [features]
-default = ["esp32s2"]
-esp32s2 = ["esp-hal/esp32s2", "esp-hal-embassy/esp32s2", "esp-backtrace/esp32s2", "esp-println"]
-esp32s3 = ["esp-hal/esp32s3", "esp-hal-embassy/esp32s3", "esp-backtrace/esp32s3", "defmt-rtt"]
+default = ["esp32s3"]
+esp32s2 = ["esp-hal/esp32s2", "esp-hal-embassy/esp32s2", "esp-backtrace/esp32s2", "esp-println/esp32s2"]
+esp32s3 = ["esp-hal/esp32s3", "esp-hal-embassy/esp32s3", "esp-backtrace/esp32s3", "esp-println/esp32s3"]
