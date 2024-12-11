@@ -5,11 +5,11 @@ edition = "2021"
 
 [dependencies]
 esp-println = { version = "0.12", features = ["defmt-espflash", "esp32s2", "critical-section"], optional = true }
-esp-hal = { version = "0.19", features = [
+esp-hal = { version = "0.20", features = [
     "async",
     "embedded-hal-02"
 ] }
-esp-hal-embassy = { version = "0.2.0" }
+esp-hal-embassy = { version = "0.3.0" }
 esp-backtrace = { version = "0.14.2", features = ["exception-handler", "panic-handler", "defmt"] }
 
 defmt = "0.3"
@@ -17,7 +17,7 @@ defmt-rtt = { version = "0.4", optional = true }
 
 static_cell = { version = "2.0.0", features = ["nightly"] }
 dap-rs = { git = "https://github.com/korken89/dap-rs.git", features = [ "defmt" ], rev = "4d083aaa7e75db2546356669b1b81b2f0cff287d" }
-embassy-executor = { version = "0.5.0", features = ["task-arena-size-40960", "defmt"] }
+embassy-executor = { version = "0.6.0", features = ["task-arena-size-40960", "defmt"] }
 embassy-usb = { version = "0.2.0", default-features = false, features = ["defmt"] }
 replace_with = { version = "0.1.7", default-features = false }
 

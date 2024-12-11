@@ -58,9 +58,9 @@ async fn main(spawner: Spawner) -> () {
     let system = SystemControl::new(peripherals.SYSTEM);
     let clocks = ClockControl::boot_defaults(system.clock_control).freeze();
 
-    let timg0 = TimerGroup::new(peripherals.TIMG0, &clocks, None);
+    let timg0 = TimerGroup::new(peripherals.TIMG0, &clocks);
     static STATIC_TIMERS: StaticCell<[OneShotTimer<ErasedTimer>; 1]> = StaticCell::new();
-    let timers = STATIC_TIMERS.init([OneShotTimer::new(timg0.timer0.into())]);
+    let timers = STATIC_TIMERS.init([OneShotTimer::new(ErasedTimer::from(timg0.timer0))]);
     esp_hal_embassy::init(&clocks, timers);
 
     let io = Io::new(peripherals.GPIO, peripherals.IO_MUX);
