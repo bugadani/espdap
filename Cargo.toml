@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-esp-println = { version = "0.9", features = ["defmt-espflash", "esp32s2", "critical-section"], optional = true }
+esp-println = { version = "0.12", features = ["defmt-espflash", "esp32s2", "critical-section"], optional = true }
 esp-hal = { git = "https://github.com/bugadani/esp-hal.git", branch = "usb", features = [
     "async",
     "embassy",
@@ -12,7 +12,7 @@ esp-hal = { git = "https://github.com/bugadani/esp-hal.git", branch = "usb", fea
     "embassy-executor-interrupt",
     "embedded-hal-02"
 ] }
-esp-backtrace = { version = "0.11.1", features = ["exception-handler", "panic-handler", "defmt"] }
+esp-backtrace = { version = "0.14.2", features = ["exception-handler", "panic-handler", "defmt"] }
 
 defmt = "0.3"
 defmt-rtt = { version = "0.4", optional = true }
