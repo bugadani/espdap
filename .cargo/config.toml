@@ -19,3 +19,6 @@ target = "xtensa-esp32s2-none-elf"
 
 [unstable]
 build-std = ["core"]
+
+[env]
+DEFMT_LOG = "info"
