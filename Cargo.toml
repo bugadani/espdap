@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-esp-println = { version = "0.12", features = ["defmt-espflash", "esp32s2", "critical-section"], optional = true }
+esp-println = { version = "0.12", features = ["defmt-espflash", "critical-section"], optional = true }
 esp-hal = { version = "0.20", features = [
     "async",
     "embedded-hal-02"
@@ -22,6 +22,6 @@ embassy-usb = { version = "0.2.0", default-features = false, features = ["defmt"
 replace_with = { version = "0.1.7", default-features = false }
 
 [features]
-default = ["esp32s2"]
-esp32s2 = ["esp-hal/esp32s2", "esp-backtrace/esp32s2", "esp-hal-embassy/esp32s2", "esp-println"]
-esp32s3 = ["esp-hal/esp32s3", "esp-backtrace/esp32s3", "esp-hal-embassy/esp32s3", "defmt-rtt"]
+default = ["esp32s3"]
+esp32s2 = ["esp-hal/esp32s2", "esp-hal-embassy/esp32s2", "esp-backtrace/esp32s2", "esp-println/esp32s2"]
+esp32s3 = ["esp-hal/esp32s3", "esp-hal-embassy/esp32s3", "esp-backtrace/esp32s3", "esp-println/esp32s3"]

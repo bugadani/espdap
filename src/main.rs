@@ -1,6 +1,5 @@
 #![no_std]
 #![no_main]
-#![feature(type_alias_impl_trait)]
 
 use dap_rs::{
     dap::{Dap, DapLeds, DapVersion},
@@ -9,7 +8,7 @@ use dap_rs::{
     swo::Swo,
 };
 use defmt::{info, todo, unwrap, warn};
-#[cfg(feature = "esp32s3")]
+#[cfg(feature = "defmt-rtt")]
 use defmt_rtt as _;
 use embassy_executor::Spawner;
 use embassy_usb::{
@@ -33,7 +32,7 @@ use esp_hal::{
     system::SystemControl,
     timer::{timg::TimerGroup, ErasedTimer, OneShotTimer},
 };
-#[cfg(feature = "esp32s2")]
+#[cfg(feature = "esp-println")]
 use esp_println as _;
 use static_cell::StaticCell;
 
