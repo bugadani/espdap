@@ -4,19 +4,22 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-esp-println = { version = "0.12", features = ["defmt-espflash", "critical-section"], optional = true }
-esp-hal = { version = "0.22", features = [] }
-esp-hal-embassy = { version = "0.5.0" }
-esp-backtrace = { version = "0.14.2", features = ["exception-handler", "panic-handler", "defmt"] }
+esp-println = { version = "0.13.1", features = ["defmt-espflash", "critical-section"], optional = true, git = "https://github.com/esp-rs/esp-hal.git" }
+esp-hal = { version = "1.0.0-beta.0", features = ["unstable"], git = "https://github.com/esp-rs/esp-hal.git" }
+esp-hal-embassy = { version = "0.7.0", git = "https://github.com/esp-rs/esp-hal.git" }
+esp-backtrace = { version = "0.15.1", features = ["exception-handler", "panic-handler", "defmt"], git = "https://github.com/esp-rs/esp-hal.git" }
+xtensa-lx = { version = "0.10.0", git = "https://github.com/esp-rs/esp-hal.git" }
 
-defmt = "0.3"
-defmt-rtt = { version = "0.4", optional = true }
+defmt = "1.0.1"
+defmt-rtt = { version = "1.0.0", optional = true }
 
 static_cell = { version = "2.0.0", features = ["nightly"] }
-dap-rs = { git = "https://github.com/korken89/dap-rs.git", features = [ "defmt" ], rev = "4d083aaa7e75db2546356669b1b81b2f0cff287d" }
-embassy-executor = { version = "0.6.0", features = ["task-arena-size-40960", "defmt"] }
+embassy-executor = { version = "0.7.0", features = ["task-arena-size-40960", "defmt"] }
 embassy-usb = { version = "0.2.0", default-features = false, features = ["defmt"] }
 replace_with = { version = "0.1.7", default-features = false }
+
+dap-rs = { git = "https://github.com/bugadani/dap-rs", rev = "0d2f47e", features = ["defmt"] }
+bitbang-dap = { git = "https://github.com/bugadani/bitbang-dap", rev = "3892773", features = ["defmt"] }
 
 [features]
 default = ["esp32s3"]

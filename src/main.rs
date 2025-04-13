@@ -1,10 +1,10 @@
 #![no_std]
 #![no_main]
 
+use bitbang_dap::{BitbangAdapter, DelayCycles, InputOutputPin};
 use dap_rs::{
-    dap::{Dap, DapLeds, DapVersion},
-    swd::{self, APnDP, DPRegister},
-    swj::{Dependencies, Pins},
+    dap::{Dap, DapLeds, DapVersion, DelayNs},
+    jtag::TapConfig,
     swo::Swo,
 };
 use defmt::{info, todo, unwrap, warn};
@@ -20,37 +20,48 @@ use embassy_usb::{
 };
 use esp_backtrace as _;
 use esp_hal::{
+    clock::CpuClock,
     delay::Delay,
-    gpio::{Flex, GpioPin, Io, Level, Pull},
+    gpio::{Flex, InputPin, OutputPin, Pull},
     otg_fs::{
         asynch::{Config, Driver},
         Usb,
     },
-    prelude::*,
     timer::timg::TimerGroup,
 };
 #[cfg(feature = "esp-println")]
 use esp_println as _;
-use static_cell::StaticCell;
+use static_cell::{ConstStaticCell, StaticCell};
 
 type MyDriver = Driver<'static>;
 
-// Pin configuration
-const NRESET_PIN: u8 = 15;
-const TMS_SWDIO_PIN: u8 = 16;
-const TCK_SWCLK_PIN: u8 = 17;
-const TDI_PIN: u8 = 18;
-const TDO_PIN: u8 = 8;
+struct BitDelay;
+
+impl DelayNs for BitDelay {
+    fn delay_ns(&mut self, ns: u32) {
+        Delay::new().delay_ns(ns)
+    }
+}
+
+impl DelayCycles for BitDelay {
+    fn delay_cycles(&mut self, cycles: u32) {
+        xtensa_lx::timer::delay(cycles)
+    }
+
+    fn cpu_clock(&self) -> u32 {
+        240_000_000
+    }
+}
 
 #[embassy_executor::task]
 async fn usb_task(mut device: UsbDevice<'static, MyDriver>) {
     device.run().await;
 }
 
-#[main]
+#[esp_hal_embassy::main]
 async fn main(spawner: Spawner) -> () {
     info!("Init!");
-    let peripherals = esp_hal::init(esp_hal::Config::default());
+    let peripherals = esp_hal::init(esp_hal::Config::default().with_cpu_clock(CpuClock::max()));
 
     let timg0 = TimerGroup::new(peripherals.TIMG0);
     esp_hal_embassy::init(timg0.timer0);
@@ -127,13 +138,15 @@ async fn main(spawner: Spawner) -> () {
     unwrap!(spawner.spawn(usb_task(usb)));
 
     // Process DAP commands in a loop.
-    let deps = Deps::new(
-        t_nrst,
-        t_jtdi,
-        t_jtms_swdio,
-        t_jtck_swclk,
-        t_jtdo,
-        Delay::new(),
+    static SCAN_CHAIN: ConstStaticCell<[TapConfig; 8]> = ConstStaticCell::new([TapConfig::INIT; 8]);
+    let deps = BitbangAdapter::new(
+        IoPin::new(t_nrst),
+        IoPin::new(t_jtdi),
+        IoPin::new(t_jtms_swdio),
+        IoPin::new(t_jtck_swclk),
+        IoPin::new(t_jtdo),
+        BitDelay,
+        SCAN_CHAIN.take(),
     );
 
     let mut dap = Dap::new(deps, Leds, Delay::new(), None::<NoSwo>, "Embassy CMSIS-DAP");
@@ -196,228 +209,36 @@ impl Handler for Control {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, defmt::Format)]
-pub enum Dir {
-    Write = 0,
-    Read = 1,
+struct IoPin<'a> {
+    pin: Flex<'a>,
 }
 
-struct Deps {
-    nreset: Flex<'static, GpioPin<NRESET_PIN>>,
-    tdi: Flex<'static, GpioPin<TDI_PIN>>,
-    tms_swdio: Flex<'static, GpioPin<TMS_SWDIO_PIN>>,
-    tck_swclk: Flex<'static, GpioPin<TCK_SWCLK_PIN>>,
-    tdo: Flex<'static, GpioPin<TDO_PIN>>,
-    delay: Delay,
-}
-
-impl Deps {
-    pub fn new(
-        nreset: GpioPin<NRESET_PIN>,
-        tdi: GpioPin<TDI_PIN>,
-        tms_swdio: GpioPin<TMS_SWDIO_PIN>,
-        tck_swclk: GpioPin<TCK_SWCLK_PIN>,
-        tdo: GpioPin<TDO_PIN>,
-        delay: Delay,
-    ) -> Self {
-        let mut nreset = Flex::new_typed(nreset);
-        let mut tdi = Flex::new_typed(tdi);
-        let mut tms_swdio = Flex::new_typed(tms_swdio);
-        let mut tck_swclk = Flex::new_typed(tck_swclk);
-        let mut tdo = Flex::new_typed(tdo);
-
-        nreset.set_as_output();
-        nreset.set_high();
-
-        //io.set_pull(Pull::Up);
-        tms_swdio.set_as_output();
-        tms_swdio.set_high();
-
-        //ck.set_pull(Pull::None);
-        tck_swclk.set_as_output();
-
-        tdi.set_as_input(Pull::None);
-        tdo.set_as_output();
-
+impl<'a> IoPin<'a> {
+    fn new(pin: impl InputPin + OutputPin + 'a) -> Self {
         Self {
-            nreset,
-            tdi,
-            tms_swdio,
-            tck_swclk,
-            tdo,
-            delay,
-        }
-    }
-
-    fn req(&mut self, port: APnDP, dir: Dir, addr: DPRegister) {
-        let req = (port as u32) | (dir as u32) << 1 | (addr as u32) << 2;
-        let parity = req.count_ones() % 2;
-        self.shift_out(0b10000001 | req << 1 | parity << 5, 8);
-    }
-
-    pub fn read(&mut self, port: APnDP, addr: DPRegister) -> swd::Result<u32> {
-        self.req(port, Dir::Read, addr);
-
-        self.shift_in(1); // turnaround
-
-        let ack = self.shift_in(3);
-        match ack {
-            0b001 => {} // ok
-            0b010 => {
-                self.shift_in(1); // turnaround
-                return Err(swd::Error::AckWait);
-            }
-            0b100 => {
-                self.shift_in(1); // turnaround
-                return Err(swd::Error::AckFault);
-            }
-            _ => {
-                self.shift_in(1); // turnaround
-                return Err(swd::Error::AckUnknown(ack as u8));
-            }
-        }
-
-        let data = self.shift_in(32);
-        let parity = self.shift_in(1);
-        if parity != data.count_ones() % 2 {
-            return Err(swd::Error::BadParity);
-        }
-
-        self.shift_in(1); // turnaround
-
-        Ok(data)
-    }
-
-    pub fn write(&mut self, port: APnDP, addr: DPRegister, data: u32) -> swd::Result<()> {
-        self.req(port, Dir::Write, addr);
-
-        self.shift_in(1); // turnaround
-
-        let ack = self.shift_in(3);
-        self.shift_in(1); // turnaround
-        match ack {
-            0b001 => {} // ok
-            0b010 => return Err(swd::Error::AckWait),
-            0b100 => return Err(swd::Error::AckFault),
-            _ => return Err(swd::Error::AckUnknown(ack as _)),
-        }
-
-        self.shift_out(data, 32);
-        self.shift_out(data.count_ones() % 2, 1);
-
-        Ok(())
-    }
-
-    fn shift_out(&mut self, val: u32, n: u32) {
-        self.tms_swdio.set_as_output();
-        for i in 0..n {
-            self.tms_swdio.set_level(Level::from(val & (1 << i) != 0));
-            self.clock_pulse();
-        }
-    }
-
-    fn shift_in(&mut self, n: u32) -> u32 {
-        self.tms_swdio.set_as_input(Pull::None);
-        let mut val = 0;
-        for i in 0..n {
-            val |= (self.tms_swdio.is_high() as u32) << i;
-            self.clock_pulse();
-        }
-        val
-    }
-
-    fn clock_pulse(&mut self) {
-        wait(&mut self.delay);
-        self.tck_swclk.set_high();
-        wait(&mut self.delay);
-        self.tck_swclk.set_low();
-    }
-}
-
-fn wait(delay: &mut Delay) {
-    delay.delay_nanos(500);
-}
-
-impl Dependencies<Deps, Deps> for Deps {
-    fn high_impedance_mode(&mut self) {
-        // todo
-    }
-
-    fn process_swj_clock(&mut self, max_frequency: u32) -> bool {
-        true // TODO
-    }
-
-    fn process_swj_pins(&mut self, output: Pins, mask: Pins, wait_us: u32) -> Pins {
-        if mask.contains(Pins::SWCLK) {
-            self.tck_swclk
-                .set_level(Level::from(output.contains(Pins::SWCLK)));
-        }
-        if mask.contains(Pins::SWDIO) {
-            self.tms_swdio
-                .set_level(Level::from(output.contains(Pins::SWDIO)));
-        }
-        if mask.contains(Pins::NRESET) {
-            self.nreset
-                .set_level(Level::from(output.contains(Pins::NRESET)));
-        }
-        if mask.contains(Pins::TDO) {
-            self.tdo.set_level(Level::from(output.contains(Pins::TDO)));
-        }
-
-        if wait_us != 0 {
-            self.delay.delay_micros(wait_us);
-        }
-
-        let mut read = Pins::empty();
-
-        read.set(Pins::SWCLK, self.tck_swclk.is_high());
-        read.set(Pins::SWDIO, self.tms_swdio.is_high());
-        read.set(Pins::NRESET, self.nreset.is_high());
-        read.set(Pins::TDO, self.tdo.is_high());
-        read.set(Pins::TDI, self.tdi.is_high());
-        read.set(Pins::NTRST, true);
-
-        read
-    }
-
-    fn process_swj_sequence(&mut self, data: &[u8], mut nbits: usize) {
-        for &b in data {
-            if nbits == 0 {
-                break;
-            }
-            let bits = nbits.min(8);
-            self.shift_out(b as u32, bits as u32);
-            nbits -= bits;
+            pin: Flex::new(pin),
         }
     }
 }
 
-impl dap_rs::swd::Swd<Deps> for Deps {
-    const AVAILABLE: bool = true;
-
-    fn read_inner(&mut self, port: APnDP, addr: DPRegister) -> swd::Result<u32> {
-        self.read(port, addr)
+impl InputOutputPin for IoPin<'_> {
+    fn set_as_output(&mut self) {
+        self.pin.set_as_output();
     }
 
-    fn write_inner(&mut self, port: APnDP, addr: DPRegister, data: u32) -> swd::Result<()> {
-        self.write(port, addr, data)
+    fn set_high(&mut self, high: bool) {
+        match high {
+            true => self.pin.set_high(),
+            false => self.pin.set_low(),
+        }
     }
 
-    fn set_clock(&mut self, max_frequency: u32) -> bool {
-        // todo
-        true
-    }
-}
-
-impl dap_rs::jtag::Jtag<Deps> for Deps {
-    const AVAILABLE: bool = false;
-
-    fn sequences(&mut self, data: &[u8], rxbuf: &mut [u8]) -> u32 {
-        todo!()
+    fn set_as_input(&mut self) {
+        self.pin.set_as_input(Pull::None);
     }
 
-    fn set_clock(&mut self, max_frequency: u32) -> bool {
-        todo!()
+    fn is_high(&mut self) -> bool {
+        self.pin.is_high()
     }
 }
 
@@ -425,30 +246,30 @@ struct Leds;
 
 impl DapLeds for Leds {
     fn react_to_host_status(&mut self, host_status: dap_rs::dap::HostStatus) {
-        // TODO
+        info!("Host status: {:?}", host_status);
     }
 }
 
 struct NoSwo;
 
 impl Swo for NoSwo {
-    fn set_transport(&mut self, transport: dap_rs::swo::SwoTransport) {
+    fn set_transport(&mut self, _transport: dap_rs::swo::SwoTransport) {
         todo!()
     }
 
-    fn set_mode(&mut self, mode: dap_rs::swo::SwoMode) {
+    fn set_mode(&mut self, _mode: dap_rs::swo::SwoMode) {
         todo!()
     }
 
-    fn set_baudrate(&mut self, baudrate: u32) -> u32 {
+    fn set_baudrate(&mut self, _baudrate: u32) -> u32 {
         todo!()
     }
 
-    fn set_control(&mut self, control: dap_rs::swo::SwoControl) {
+    fn set_control(&mut self, _control: dap_rs::swo::SwoControl) {
         todo!()
     }
 
-    fn polling_data(&mut self, buf: &mut [u8]) -> u32 {
+    fn polling_data(&mut self, _buf: &mut [u8]) -> u32 {
         todo!()
     }
 
