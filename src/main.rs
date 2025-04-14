@@ -20,7 +20,7 @@ use embassy_usb::{
 };
 use esp_backtrace as _;
 use esp_hal::{
-    clock::CpuClock,
+    clock::{Clock, CpuClock},
     delay::Delay,
     gpio::{Flex, InputPin, OutputPin, Pull},
     otg_fs::{
@@ -49,7 +49,7 @@ impl DelayCycles for BitDelay {
     }
 
     fn cpu_clock(&self) -> u32 {
-        240_000_000
+        CpuClock::max().frequency().as_hz()
     }
 }
 
@@ -66,7 +66,8 @@ async fn main(spawner: Spawner) -> () {
     let timg0 = TimerGroup::new(peripherals.TIMG0);
     esp_hal_embassy::init(timg0.timer0);
 
-    // Pinout
+    // Configuration options:
+    // 1. Pinout
     let t_nrst = peripherals.GPIO15;
     let t_jtms_swdio = peripherals.GPIO16;
     let t_jtck_swclk = peripherals.GPIO17;
@@ -74,6 +75,13 @@ async fn main(spawner: Spawner) -> () {
     let t_jtdo = peripherals.GPIO8;
     //let t_nrst = peripherals.GPIO4;
     //let t_swo = peripherals.GPIO5;
+
+    // 2. Max JTAG scan chain
+    const MAX_SCAN_CHAIN_LENGTH: usize = 8;
+
+    // 3. USB configuration
+    let manufacturer = "me";
+    let product = "ESP32 Probe CMSIS-DAP";
 
     let usb = Usb::new(peripherals.USB0, peripherals.GPIO20, peripherals.GPIO19);
 
@@ -83,10 +91,9 @@ async fn main(spawner: Spawner) -> () {
     let config = Config::default();
     let driver = Driver::new(usb, ep_out_buffer, config);
 
-    // Create embassy-usb Config.
     let mut config = embassy_usb::Config::new(0xc0de, 0xcafe);
-    config.manufacturer = Some("me");
-    config.product = Some("ESP32 Probe CMSIS-DAP");
+    config.manufacturer = Some(manufacturer);
+    config.product = Some(product);
     config.serial_number = Some("12345678");
     config.device_class = 0xEF;
     config.device_sub_class = 0x02;
@@ -138,7 +145,8 @@ async fn main(spawner: Spawner) -> () {
     unwrap!(spawner.spawn(usb_task(usb)));
 
     // Process DAP commands in a loop.
-    static SCAN_CHAIN: ConstStaticCell<[TapConfig; 8]> = ConstStaticCell::new([TapConfig::INIT; 8]);
+    static SCAN_CHAIN: ConstStaticCell<[TapConfig; MAX_SCAN_CHAIN_LENGTH]> =
+        ConstStaticCell::new([TapConfig::INIT; MAX_SCAN_CHAIN_LENGTH]);
     let deps = BitbangAdapter::new(
         IoPin::new(t_nrst),
         IoPin::new(t_jtdi),
@@ -149,7 +157,13 @@ async fn main(spawner: Spawner) -> () {
         SCAN_CHAIN.take(),
     );
 
-    let mut dap = Dap::new(deps, Leds, Delay::new(), None::<NoSwo>, "Embassy CMSIS-DAP");
+    let mut dap = Dap::new(
+        deps,
+        Leds,
+        Delay::new(),
+        None::<NoSwo>,
+        concat!("2.1.0, Adaptor version ", env!("CARGO_PKG_VERSION")),
+    );
 
     let mut req = [0u8; 1024];
     let mut resp = [0u8; 1024];

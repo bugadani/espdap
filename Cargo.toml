@@ -15,11 +15,11 @@ defmt-rtt = { version = "1.0.0", optional = true }
 
 static_cell = { version = "2.0.0", features = ["nightly"] }
 embassy-executor = { version = "0.7.0", features = ["task-arena-size-40960", "defmt"] }
-embassy-usb = { version = "0.2.0", default-features = false, features = ["defmt"] }
+embassy-usb = { version = "0.4.0", default-features = false, features = ["defmt"] }
 replace_with = { version = "0.1.7", default-features = false }
 
-dap-rs = { git = "https://github.com/bugadani/dap-rs", rev = "0d2f47e", features = ["defmt"] }
-bitbang-dap = { git = "https://github.com/bugadani/bitbang-dap", rev = "3892773", features = ["defmt"] }
+dap-rs = { git = "https://github.com/bugadani/dap-rs", rev = "e9aa3c3", features = ["defmt"] }
+bitbang-dap = { git = "https://github.com/bugadani/bitbang-dap", rev = "138717a", features = ["defmt"] }
 
 [features]
 default = ["esp32s3"]
