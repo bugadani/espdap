@@ -14,8 +14,9 @@ defmt = "1.0.1"
 defmt-rtt = { version = "1.0.0", optional = true }
 
 static_cell = { version = "2.0.0", features = ["nightly"] }
-embassy-executor = { version = "0.7.0", features = ["task-arena-size-40960", "defmt"] }
+embassy-executor = { version = "0.7.0", features = ["defmt"] }
 embassy-usb = { version = "0.4.0", default-features = false, features = ["defmt"] }
+embassy-futures = { version = "0.1.0" }
 replace_with = { version = "0.1.7", default-features = false }
 
 dap-rs = { git = "https://github.com/bugadani/dap-rs", rev = "e9aa3c3", features = ["defmt"] }
@@ -25,3 +26,11 @@ bitbang-dap = { git = "https://github.com/bugadani/bitbang-dap", rev = "138717a"
 default = ["esp32s3"]
 esp32s2 = ["esp-hal/esp32s2", "esp-hal-embassy/esp32s2", "esp-backtrace/esp32s2", "esp-println/esp32s2"]
 esp32s3 = ["esp-hal/esp32s3", "esp-hal-embassy/esp32s3", "esp-backtrace/esp32s3", "esp-println/esp32s3"]
+
+[patch.crates-io]
+embassy-usb = { git = "https://github.com/embassy-rs/embassy" }
+embassy-usb-driver = { git = "https://github.com/embassy-rs/embassy" }
+embassy-futures = { git = "https://github.com/embassy-rs/embassy" }
+embassy-executor = { git = "https://github.com/embassy-rs/embassy" }
+embassy-time = { git = "https://github.com/embassy-rs/embassy" }
+embassy-time-driver = { git = "https://github.com/embassy-rs/embassy" }

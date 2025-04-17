@@ -7,16 +7,15 @@ use dap_rs::{
     jtag::TapConfig,
     swo::Swo,
 };
-use defmt::{info, todo, unwrap, warn};
+use defmt::{info, todo, warn};
 #[cfg(feature = "defmt-rtt")]
 use defmt_rtt as _;
 use embassy_executor::Spawner;
+use embassy_futures::join::join;
 use embassy_usb::{
     class::cdc_acm::{CdcAcmClass, State},
-    driver::{Endpoint, EndpointError, EndpointIn, EndpointOut},
-    msos::{self, windows_version},
-    types::StringIndex,
-    Builder, Handler, UsbDevice,
+    msos::windows_version,
+    Builder,
 };
 use esp_backtrace as _;
 use esp_hal::{
@@ -33,7 +32,9 @@ use esp_hal::{
 use esp_println as _;
 use static_cell::{ConstStaticCell, StaticCell};
 
-type MyDriver = Driver<'static>;
+use crate::usb_driver::{CmsisDapV2Class, CmsisDapV2State};
+
+mod usb_driver;
 
 struct BitDelay;
 
@@ -53,13 +54,8 @@ impl DelayCycles for BitDelay {
     }
 }
 
-#[embassy_executor::task]
-async fn usb_task(mut device: UsbDevice<'static, MyDriver>) {
-    device.run().await;
-}
-
 #[esp_hal_embassy::main]
-async fn main(spawner: Spawner) -> () {
+async fn main(_spawner: Spawner) -> () {
     info!("Init!");
     let peripherals = esp_hal::init(esp_hal::Config::default().with_cpu_clock(CpuClock::max()));
 
@@ -80,20 +76,19 @@ async fn main(spawner: Spawner) -> () {
     const MAX_SCAN_CHAIN_LENGTH: usize = 8;
 
     // 3. USB configuration
-    let manufacturer = "me";
-    let product = "ESP32 Probe CMSIS-DAP";
+    const MANUFACTURER: &str = "me";
+    const PRODUCT: &str = "ESP32 Probe CMSIS-DAP";
 
     let usb = Usb::new(peripherals.USB0, peripherals.GPIO20, peripherals.GPIO19);
 
     // Create the driver, from the HAL.
-    static STATIC_EP_OUT_BUFFER: StaticCell<[u8; 1024]> = StaticCell::new();
-    let ep_out_buffer = STATIC_EP_OUT_BUFFER.init([0u8; 1024]);
-    let config = Config::default();
-    let driver = Driver::new(usb, ep_out_buffer, config);
+    static STATIC_EP_OUT_BUFFER: ConstStaticCell<[u8; 1024]> = ConstStaticCell::new([0u8; 1024]);
+    let driver = Driver::new(usb, STATIC_EP_OUT_BUFFER.take(), Config::default());
 
+    // Create embassy-usb Config
     let mut config = embassy_usb::Config::new(0xc0de, 0xcafe);
-    config.manufacturer = Some(manufacturer);
-    config.product = Some(product);
+    config.manufacturer = Some(MANUFACTURER);
+    config.product = Some(PRODUCT);
     config.serial_number = Some("12345678");
     config.device_class = 0xEF;
     config.device_sub_class = 0x02;
@@ -117,32 +112,20 @@ async fn main(spawner: Spawner) -> () {
     builder.msos_descriptor(windows_version::WIN8_1, 0);
 
     // DAP - Custom Class 0
-    let iface_string = builder.string();
-    let mut function = builder.function(0xFF, 0, 0);
-    function.msos_feature(msos::CompatibleIdFeatureDescriptor::new("WINUSB", ""));
-    function.msos_feature(msos::RegistryPropertyFeatureDescriptor::new(
-        "DeviceInterfaceGUIDs",
-        // CMSIS-DAP standard GUID, from https://arm-software.github.io/CMSIS_5/DAP/html/group__DAP__ConfigUSB__gr.html
-        msos::PropertyData::RegMultiSz(&["{CDB3B5AD-293B-4663-AA36-1AAE46463776}"]),
-    ));
-    let mut interface = function.interface();
-    let mut altsetting = interface.alt_setting(0xFF, 0, 0, Some(iface_string));
-    let mut read_ep = altsetting.endpoint_bulk_out(64);
-    let mut write_ep = altsetting.endpoint_bulk_in(64);
-    drop(function);
-
-    static CONTROL_HANDLER: StaticCell<Control> = StaticCell::new();
-    builder.handler(CONTROL_HANDLER.init(Control { iface_string }));
+    static DAP_STATE: ConstStaticCell<CmsisDapV2State> =
+        ConstStaticCell::new(CmsisDapV2State::new());
+    let mut dap_class = CmsisDapV2Class::new(&mut builder, DAP_STATE.take(), 64);
 
     // CDC - dummy class to get things working for now. Windows needs more than one interface
     // to load usbccgp.sys, which is necessary for nusb to be able to list interfaces.
-    static STATIC_STATE: StaticCell<State> = StaticCell::new();
-    let state = STATIC_STATE.init(State::new());
-    _ = CdcAcmClass::new(&mut builder, state, 64);
+    static CDC_STATE: ConstStaticCell<State> = ConstStaticCell::new(State::new());
+    _ = CdcAcmClass::new(&mut builder, CDC_STATE.take(), 64);
 
-    // Start USB.
-    let usb = builder.build();
-    unwrap!(spawner.spawn(usb_task(usb)));
+    // Build the builder.
+    let mut usb = builder.build();
+
+    // Run the USB device.
+    let usb_fut = usb.run();
 
     // Process DAP commands in a loop.
     static SCAN_CHAIN: ConstStaticCell<[TapConfig; MAX_SCAN_CHAIN_LENGTH]> =
@@ -165,62 +148,30 @@ async fn main(spawner: Spawner) -> () {
         concat!("2.1.0, Adaptor version ", env!("CARGO_PKG_VERSION")),
     );
 
-    let mut req = [0u8; 1024];
-    let mut resp = [0u8; 1024];
-    loop {
-        read_ep.wait_enabled().await;
+    let dap_fut = async {
+        let mut req = [0u8; 1024];
+        let mut resp = [0u8; 1024];
+        loop {
+            dap_class.wait_connection().await;
 
-        let req_len = match read_packet(&mut read_ep, &mut req).await {
-            Ok(n) => n,
-            Err(e) => {
+            let Ok(req_len) = dap_class.read_packet(&mut req).await.inspect_err(|e| {
                 warn!("failed to read from USB: {:?}", e);
+            }) else {
+                continue;
+            };
+
+            let resp_len = dap.process_command(&req[..req_len], &mut resp, DapVersion::V2);
+
+            if let Err(e) = dap_class.write_packet(&resp[..resp_len]).await {
+                warn!("failed to write to USB: {:?}", e);
                 continue;
             }
-        };
-        let resp_len = dap.process_command(&req[..req_len], &mut resp, DapVersion::V2);
-
-        if let Err(e) = write_packet(&mut write_ep, &resp[..resp_len]).await {
-            warn!("failed to write to USB: {:?}", e);
-            continue;
         }
-    }
-}
+    };
 
-async fn read_packet(ep: &mut impl EndpointOut, buf: &mut [u8]) -> Result<usize, EndpointError> {
-    let mut n = 0;
-
-    loop {
-        let i = ep.read(&mut buf[n..]).await?;
-        n += i;
-        if i < 64 {
-            return Ok(n);
-        }
-    }
-}
-
-async fn write_packet(ep: &mut impl EndpointIn, buf: &[u8]) -> Result<(), EndpointError> {
-    for chunk in buf.chunks(64) {
-        ep.write(chunk).await?;
-    }
-    if buf.len() % 64 == 0 {
-        ep.write(&[]).await?;
-    }
-    Ok(())
-}
-
-struct Control {
-    iface_string: StringIndex,
-}
-
-impl Handler for Control {
-    fn get_string(&mut self, index: StringIndex, _lang_id: u16) -> Option<&str> {
-        if index == self.iface_string {
-            Some("CMSIS-DAP v2 Interface")
-        } else {
-            warn!("unknown string index requested");
-            None
-        }
-    }
+    // Run everything concurrently.
+    // If we had made everything `'static` above instead, we could do this using separate tasks instead.
+    join(usb_fut, dap_fut).await;
 }
 
 struct IoPin<'a> {
