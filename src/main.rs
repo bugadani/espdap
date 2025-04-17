@@ -7,7 +7,7 @@ use dap_rs::{
     jtag::TapConfig,
     swo::Swo,
 };
-use defmt::{info, todo, warn};
+use defmt::{info, todo, unwrap, warn};
 #[cfg(feature = "defmt-rtt")]
 use defmt_rtt as _;
 use embassy_executor::Spawner;
@@ -30,6 +30,7 @@ use esp_hal::{
 };
 #[cfg(feature = "esp-println")]
 use esp_println as _;
+use heapless::String;
 use static_cell::{ConstStaticCell, StaticCell};
 
 use crate::usb_driver::{CmsisDapV2Class, CmsisDapV2State};
@@ -85,11 +86,27 @@ async fn main(_spawner: Spawner) -> () {
     static STATIC_EP_OUT_BUFFER: ConstStaticCell<[u8; 1024]> = ConstStaticCell::new([0u8; 1024]);
     let driver = Driver::new(usb, STATIC_EP_OUT_BUFFER.take(), Config::default());
 
+    static SERIAL: ConstStaticCell<String<12>> = ConstStaticCell::new(String::<12>::new());
+    let serial = SERIAL.take();
+    for b in esp_hal::efuse::Efuse::mac_address() {
+        let lower = b & 0x0F;
+        let upper = (b >> 4) & 0x0F;
+        fn hex(nibble: u8) -> char {
+            if nibble < 10 {
+                (b'0' + nibble) as char
+            } else {
+                (b'A' + nibble - 10) as char
+            }
+        }
+        unwrap!(serial.push(hex(upper)));
+        unwrap!(serial.push(hex(lower)));
+    }
+
     // Create embassy-usb Config
     let mut config = embassy_usb::Config::new(0xc0de, 0xcafe);
     config.manufacturer = Some(MANUFACTURER);
     config.product = Some(PRODUCT);
-    config.serial_number = Some("12345678");
+    config.serial_number = Some(serial);
     config.device_class = 0xEF;
     config.device_sub_class = 0x02;
     config.device_protocol = 0x01;

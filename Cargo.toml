@@ -21,6 +21,7 @@ replace_with = { version = "0.1.7", default-features = false }
 
 dap-rs = { git = "https://github.com/bugadani/dap-rs", rev = "e9aa3c3", features = ["defmt"] }
 bitbang-dap = { git = "https://github.com/bugadani/bitbang-dap", rev = "138717a", features = ["defmt"] }
+heapless = "0.8.0"
 
 [features]
 default = ["esp32s3"]
