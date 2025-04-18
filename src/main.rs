@@ -33,9 +33,7 @@ use esp_println as _;
 use heapless::String;
 use static_cell::{ConstStaticCell, StaticCell};
 
-use crate::usb_driver::{CmsisDapV2Class, CmsisDapV2State};
-
-mod usb_driver;
+use embassy_usb::class::cmsis_dap_v2::{CmsisDapV2Class, State as CmsisDapV2State};
 
 struct BitDelay;
 
@@ -131,7 +129,7 @@ async fn main(_spawner: Spawner) -> () {
     // DAP - Custom Class 0
     static DAP_STATE: ConstStaticCell<CmsisDapV2State> =
         ConstStaticCell::new(CmsisDapV2State::new());
-    let mut dap_class = CmsisDapV2Class::new(&mut builder, DAP_STATE.take(), 64);
+    let mut dap_class = CmsisDapV2Class::new(&mut builder, DAP_STATE.take(), 64, true);
 
     // CDC - dummy class to get things working for now. Windows needs more than one interface
     // to load usbccgp.sys, which is necessary for nusb to be able to list interfaces.

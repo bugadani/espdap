@@ -29,9 +29,9 @@ esp32s2 = ["esp-hal/esp32s2", "esp-hal-embassy/esp32s2", "esp-backtrace/esp32s2"
 esp32s3 = ["esp-hal/esp32s3", "esp-hal-embassy/esp32s3", "esp-backtrace/esp32s3", "esp-println/esp32s3"]
 
 [patch.crates-io]
-embassy-usb = { git = "https://github.com/embassy-rs/embassy" }
-embassy-usb-driver = { git = "https://github.com/embassy-rs/embassy" }
-embassy-futures = { git = "https://github.com/embassy-rs/embassy" }
-embassy-executor = { git = "https://github.com/embassy-rs/embassy" }
-embassy-time = { git = "https://github.com/embassy-rs/embassy" }
-embassy-time-driver = { git = "https://github.com/embassy-rs/embassy" }
+embassy-usb = { git = "https://github.com/embassy-rs/embassy", rev = "3ffee5e22bc3d0a999842debc67d3111b9e3f771" }
+embassy-usb-driver = { git = "https://github.com/embassy-rs/embassy", rev = "3ffee5e22bc3d0a999842debc67d3111b9e3f771" }
+embassy-futures = { git = "https://github.com/embassy-rs/embassy", rev = "3ffee5e22bc3d0a999842debc67d3111b9e3f771" }
+embassy-executor = { git = "https://github.com/embassy-rs/embassy", rev = "3ffee5e22bc3d0a999842debc67d3111b9e3f771" }
+embassy-time = { git = "https://github.com/embassy-rs/embassy", rev = "3ffee5e22bc3d0a999842debc67d3111b9e3f771" }
+embassy-time-driver = { git = "https://github.com/embassy-rs/embassy", rev = "3ffee5e22bc3d0a999842debc67d3111b9e3f771" }
